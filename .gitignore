@@ -1,5 +1,6 @@
 # node files
-dist
+# dist is intentionally tracked in this fork — consumers install via git URL
+# rather than npm, so the prebuilt JS must be checked in.
 node_modules
 
 # iOS files

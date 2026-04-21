@@ -59,6 +59,8 @@ If your native runtime ships an older build of this plugin that predates the `ch
 <docgen-index>
 
 * [`createAlarm(...)`](#createalarm)
+* [`cancelAlarm(...)`](#cancelalarm)
+* [`cancelAllAlarms()`](#cancelallalarms)
 * [`openAlarms()`](#openalarms)
 * [`getOSInfo()`](#getosinfo)
 * [`requestPermissions(...)`](#requestpermissions)
@@ -81,8 +83,10 @@ Capacitor Alarm Plugin interface for managing native OS alarms.
 createAlarm(options: NativeAlarmCreateOptions) => Promise<NativeActionResult>
 ```
 
-Create a native OS alarm using the platform clock app.
-On Android this uses the Alarm Clock intent; on iOS this uses AlarmKit if available (iOS 16+).
+Create a native OS alarm.
+On Android the alarm is scheduled via `AlarmManager.setExactAndAllowWhileIdle`
+and owned by this app (cancellable, survives reboot via a boot receiver).
+On iOS 26+ the alarm is scheduled via AlarmKit.
 
 | Param         | Type                                                                          | Description                      |
 | ------------- | ----------------------------------------------------------------------------- | -------------------------------- |
@@ -91,6 +95,40 @@ On Android this uses the Alarm Clock intent; on iOS this uses AlarmKit if availa
 **Returns:** <code>Promise&lt;<a href="#nativeactionresult">NativeActionResult</a>&gt;</code>
 
 **Since:** 1.0.0
+
+--------------------
+
+
+### cancelAlarm(...)
+
+```typescript
+cancelAlarm(options: { id: string; }) => Promise<NativeActionResult>
+```
+
+Cancel a previously scheduled alarm by its id.
+
+| Param         | Type                         | Description                       |
+| ------------- | ---------------------------- | --------------------------------- |
+| **`options`** | <code>{ id: string; }</code> | - `{ id }` of the alarm to cancel |
+
+**Returns:** <code>Promise&lt;<a href="#nativeactionresult">NativeActionResult</a>&gt;</code>
+
+**Since:** 8.1.0
+
+--------------------
+
+
+### cancelAllAlarms()
+
+```typescript
+cancelAllAlarms() => Promise<NativeActionResult>
+```
+
+Cancel every alarm this app has scheduled.
+
+**Returns:** <code>Promise&lt;<a href="#nativeactionresult">NativeActionResult</a>&gt;</code>
+
+**Since:** 8.1.0
 
 --------------------
 
@@ -132,11 +170,12 @@ requestPermissions(options?: { exactAlarm?: boolean | undefined; } | undefined) 
 ```
 
 Request relevant permissions for alarm usage on the platform.
-On Android, may route to settings for exact alarms.
+iOS: AlarmKit authorization.
+Android: routes to system settings for exact alarms when `exactAlarm: true`.
 
-| Param         | Type                                   | Description                                      |
-| ------------- | -------------------------------------- | ------------------------------------------------ |
-| **`options`** | <code>{ exactAlarm?: boolean; }</code> | - Optional parameters for the permission request |
+| Param         | Type                                   |
+| ------------- | -------------------------------------- |
+| **`options`** | <code>{ exactAlarm?: boolean; }</code> |
 
 **Returns:** <code>Promise&lt;<a href="#permissionresult">PermissionResult</a>&gt;</code>
 
@@ -152,7 +191,6 @@ checkPermissions() => Promise<PermissionResult>
 ```
 
 Check the current permission state for native alarm access without triggering UI.
-On iOS this reports AlarmKit readiness; on Android it reports capability details.
 
 **Returns:** <code>Promise&lt;<a href="#permissionresult">PermissionResult</a>&gt;</code>
 
@@ -183,8 +221,9 @@ getAlarms() => Promise<{ alarms: AlarmInfo[]; message?: string; }>
 ```
 
 Get a list of alarms scheduled by this app.
-On iOS 26+, returns alarms from AlarmKit. On Android, this is not supported
-as the system does not provide an API to query alarms.
+iOS 26+: returns alarms from AlarmKit.
+Android: returns alarms from the local SharedPreferences store maintained
+by this plugin.
 
 **Returns:** <code>Promise&lt;{ alarms: AlarmInfo[]; message?: string; }&gt;</code>
 
@@ -200,23 +239,26 @@ as the system does not provide an API to query alarms.
 
 Result of a native action.
 
-| Prop          | Type                 | Description                                  |
-| ------------- | -------------------- | -------------------------------------------- |
-| **`success`** | <code>boolean</code> | Whether the action was successful            |
-| **`message`** | <code>string</code>  | Optional message with additional information |
+| Prop          | Type                 | Description                                                                                                                       | Since |
+| ------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| **`success`** | <code>boolean</code> | Whether the action was successful                                                                                                 |       |
+| **`message`** | <code>string</code>  | Optional message with additional information                                                                                      |       |
+| **`id`**      | <code>string</code>  | When returned from `createAlarm`, the UUID assigned to the scheduled alarm. Pass this to `cancelAlarm` to cancel the alarm later. | 8.1.0 |
 
 
 #### NativeAlarmCreateOptions
 
 Options for creating a native OS alarm via the platform clock app.
 
-| Prop          | Type                 | Description                                  |
-| ------------- | -------------------- | -------------------------------------------- |
-| **`hour`**    | <code>number</code>  | Hour of day in 24h format (0-23)             |
-| **`minute`**  | <code>number</code>  | Minute of hour (0-59)                        |
-| **`label`**   | <code>string</code>  | Optional label for the alarm                 |
-| **`skipUi`**  | <code>boolean</code> | Android only: attempt to skip UI if possible |
-| **`vibrate`** | <code>boolean</code> | Android only: set alarm to vibrate           |
+| Prop          | Type                 | Description                                                                                                                                                                                                                                                                              | Since |
+| ------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| **`id`**      | <code>string</code>  | Stable unique identifier for this alarm. When provided, the alarm can be cancelled later by calling `cancelAlarm({ id })` with the same value. Must be a UUID string on iOS (AlarmKit requirement). If omitted, the plugin generates one and returns it in the `id` field of the result. | 8.1.0 |
+| **`date`**    | <code>string</code>  | Absolute fire time in ISO 8601 format (e.g. '2026-04-23T07:30:00.000Z'). Takes precedence over `hour`/`minute` when provided. Required for alarms that should fire on a specific future date rather than the next occurrence of a time-of-day.                                           | 8.1.0 |
+| **`hour`**    | <code>number</code>  | Hour of day in 24h format (0-23). Used when `date` is not provided.                                                                                                                                                                                                                      |       |
+| **`minute`**  | <code>number</code>  | Minute of hour (0-59). Used when `date` is not provided.                                                                                                                                                                                                                                 |       |
+| **`label`**   | <code>string</code>  | Optional label for the alarm                                                                                                                                                                                                                                                             |       |
+| **`skipUi`**  | <code>boolean</code> | Android only: attempt to skip UI if possible (legacy AlarmClock intent path, deprecated)                                                                                                                                                                                                 |       |
+| **`vibrate`** | <code>boolean</code> | Android only: set alarm to vibrate                                                                                                                                                                                                                                                       |       |
 
 
 #### OSInfo
