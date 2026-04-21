@@ -214,13 +214,27 @@ class CapgoAlarmPlugin : Plugin() {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun parseIso8601(raw: String): Long {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            java.time.OffsetDateTime.parse(raw).toInstant().toEpochMilli()
-        } else {
-            // Fallback: API < 26 is below our minSdk (24) but handle defensively.
-            val iso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", java.util.Locale.US)
-            iso.parse(raw)?.time ?: throw IllegalArgumentException("Unparseable date: $raw")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return java.time.OffsetDateTime.parse(raw).toInstant().toEpochMilli()
         }
+        // API 24/25 fallback — try several common ISO 8601 variants.
+        val patterns = arrayOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        )
+        for (pattern in patterns) {
+            try {
+                val fmt = java.text.SimpleDateFormat(pattern, java.util.Locale.US)
+                // 'Z'-literal patterns treat Z as literal text, so force UTC for those
+                if (pattern.endsWith("'Z'")) fmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                return fmt.parse(raw)?.time ?: continue
+            } catch (_: Exception) {
+                continue
+            }
+        }
+        throw IllegalArgumentException("Unparseable date: $raw")
     }
 
     private fun nextTriggerAt(hour: Int, minute: Int): Long {

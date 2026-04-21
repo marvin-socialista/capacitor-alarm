@@ -132,6 +132,33 @@ internal object AlarmScheduler {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private fun loadRecords(context: Context): List<AlarmRecord> {
+        synchronized(storeLock) {
+            return loadRecordsLocked(context)
+        }
+    }
+
+    // Serializes concurrent read-modify-write of the alarm records store.
+    // Prevents lost updates when e.g. AlarmForegroundService cancels a fired
+    // alarm on its main thread while a new createAlarm lands on the plugin
+    // executor.
+    private val storeLock = Any()
+
+    private fun persistRecord(context: Context, record: AlarmRecord) {
+        synchronized(storeLock) {
+            val existing = loadRecordsLocked(context).filter { it.id != record.id }.toMutableList()
+            existing.add(record)
+            saveRecordsLocked(context, existing)
+        }
+    }
+
+    private fun removeRecord(context: Context, id: String) {
+        synchronized(storeLock) {
+            val remaining = loadRecordsLocked(context).filter { it.id != id }
+            saveRecordsLocked(context, remaining)
+        }
+    }
+
+    private fun loadRecordsLocked(context: Context): List<AlarmRecord> {
         val raw = prefs(context).getString(PREF_ALARMS_KEY, "[]") ?: "[]"
         return try {
             val arr = JSONArray(raw)
@@ -150,18 +177,7 @@ internal object AlarmScheduler {
         }
     }
 
-    private fun persistRecord(context: Context, record: AlarmRecord) {
-        val existing = loadRecords(context).filter { it.id != record.id }.toMutableList()
-        existing.add(record)
-        saveRecords(context, existing)
-    }
-
-    private fun removeRecord(context: Context, id: String) {
-        val remaining = loadRecords(context).filter { it.id != id }
-        saveRecords(context, remaining)
-    }
-
-    private fun saveRecords(context: Context, records: List<AlarmRecord>) {
+    private fun saveRecordsLocked(context: Context, records: List<AlarmRecord>) {
         val arr = JSONArray()
         for (r in records) {
             arr.put(JSONObject().apply {
@@ -176,6 +192,8 @@ internal object AlarmScheduler {
     }
 
     private fun clearRecords(context: Context) {
-        prefs(context).edit().remove(PREF_ALARMS_KEY).apply()
+        synchronized(storeLock) {
+            prefs(context).edit().remove(PREF_ALARMS_KEY).apply()
+        }
     }
 }

@@ -48,6 +48,8 @@ class AlarmForegroundService : Service() {
 
     private var mediaPlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var vibratorRef: Vibrator? = null
+    private var vibratorManagerRef: VibratorManager? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -156,11 +158,13 @@ class AlarmForegroundService : Service() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vibratorManagerRef = vm
                 val effect = VibrationEffect.createWaveform(VIBRATION_PATTERN, 1)
                 vm.defaultVibrator.vibrate(android.os.CombinedVibration.createParallel(effect))
             } else {
                 @Suppress("DEPRECATION")
                 val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                vibratorRef = vibrator
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     vibrator.vibrate(VibrationEffect.createWaveform(VIBRATION_PATTERN, 1))
                 } else {
@@ -173,6 +177,19 @@ class AlarmForegroundService : Service() {
         }
     }
 
+    private fun stopVibration() {
+        try {
+            vibratorManagerRef?.cancel()
+            @Suppress("DEPRECATION")
+            vibratorRef?.cancel()
+        } catch (_: Exception) {
+            // best effort
+        } finally {
+            vibratorManagerRef = null
+            vibratorRef = null
+        }
+    }
+
     fun dismissAlarm() {
         Log.d(TAG, "Dismissing alarm")
         mediaPlayer?.run {
@@ -180,6 +197,8 @@ class AlarmForegroundService : Service() {
             release()
         }
         mediaPlayer = null
+
+        stopVibration()
 
         wakeLock?.run { if (isHeld) release() }
         wakeLock = null

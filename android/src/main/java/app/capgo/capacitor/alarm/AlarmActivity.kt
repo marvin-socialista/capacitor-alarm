@@ -3,6 +3,7 @@ package app.capgo.capacitor.alarm
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import androidx.core.content.ContextCompat
 import android.view.Gravity
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -94,7 +95,15 @@ class AlarmActivity : AppCompatActivity() {
         val stopIntent = Intent(this, AlarmForegroundService::class.java).apply {
             action = AlarmForegroundService.ACTION_DISMISS
         }
-        startService(stopIntent)
+        // Use ContextCompat.startForegroundService — guards against
+        // IllegalStateException on API 26+ when the service is no longer
+        // running as a foreground service (e.g. OOM-killed while activity
+        // was visible).
+        try {
+            ContextCompat.startForegroundService(this, stopIntent)
+        } catch (_: Exception) {
+            // Service may already be gone; activity close is still the right outcome.
+        }
         finish()
     }
 }
