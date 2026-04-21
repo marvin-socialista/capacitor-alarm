@@ -4,13 +4,31 @@
  * @since 1.0.0
  */
 export interface NativeAlarmCreateOptions {
-  /** Hour of day in 24h format (0-23) */
-  hour: number;
-  /** Minute of hour (0-59) */
-  minute: number;
+  /**
+   * Stable unique identifier for this alarm. When provided, the alarm can be
+   * cancelled later by calling `cancelAlarm({ id })` with the same value.
+   * Must be a UUID string on iOS (AlarmKit requirement). If omitted, the plugin
+   * generates one and returns it in the `id` field of the result.
+   *
+   * @since 8.1.0
+   */
+  id?: string;
+  /**
+   * Absolute fire time in ISO 8601 format (e.g. '2026-04-23T07:30:00.000Z').
+   * Takes precedence over `hour`/`minute` when provided.
+   * Required for alarms that should fire on a specific future date rather than
+   * the next occurrence of a time-of-day.
+   *
+   * @since 8.1.0
+   */
+  date?: string;
+  /** Hour of day in 24h format (0-23). Used when `date` is not provided. */
+  hour?: number;
+  /** Minute of hour (0-59). Used when `date` is not provided. */
+  minute?: number;
   /** Optional label for the alarm */
   label?: string;
-  /** Android only: attempt to skip UI if possible */
+  /** Android only: attempt to skip UI if possible (legacy AlarmClock intent path, deprecated) */
   skipUi?: boolean;
   /** Android only: set alarm to vibrate */
   vibrate?: boolean;
@@ -26,6 +44,13 @@ export interface NativeActionResult {
   success: boolean;
   /** Optional message with additional information */
   message?: string;
+  /**
+   * When returned from `createAlarm`, the UUID assigned to the scheduled alarm.
+   * Pass this to `cancelAlarm` to cancel the alarm later.
+   *
+   * @since 8.1.0
+   */
+  id?: string;
 }
 
 /**
@@ -85,125 +110,81 @@ export interface PermissionResult {
  */
 export interface CapgoAlarmPlugin {
   /**
-   * Create a native OS alarm using the platform clock app.
-   * On Android this uses the Alarm Clock intent; on iOS this uses AlarmKit if available (iOS 16+).
+   * Create a native OS alarm.
+   * On Android the alarm is scheduled via `AlarmManager.setExactAndAllowWhileIdle`
+   * and owned by this app (cancellable, survives reboot via a boot receiver).
+   * On iOS 26+ the alarm is scheduled via AlarmKit.
    *
    * @param options - Options for creating the alarm
-   * @returns Promise that resolves with the action result
-   * @throws Error if alarm creation fails or permissions are not granted
+   * @returns Promise that resolves with `{ success, id? }`. `id` is the UUID
+   *   that can be passed to `cancelAlarm`.
    * @since 1.0.0
-   * @example
-   * ```typescript
-   * const result = await CapgoAlarm.createAlarm({
-   *   hour: 7,
-   *   minute: 30,
-   *   label: 'Wake up',
-   *   skipUi: false,
-   *   vibrate: true
-   * });
-   * console.log('Alarm created:', result.success);
-   * ```
    */
   createAlarm(options: NativeAlarmCreateOptions): Promise<NativeActionResult>;
+
+  /**
+   * Cancel a previously scheduled alarm by its id.
+   *
+   * @param options - `{ id }` of the alarm to cancel
+   * @returns `{ success: true }` if the alarm was cancelled (or did not exist);
+   *   `{ success: false, message }` on error.
+   * @since 8.1.0
+   */
+  cancelAlarm(options: { id: string }): Promise<NativeActionResult>;
+
+  /**
+   * Cancel every alarm this app has scheduled.
+   *
+   * @returns `{ success: true }` when all alarms have been cancelled.
+   * @since 8.1.0
+   */
+  cancelAllAlarms(): Promise<NativeActionResult>;
 
   /**
    * Open the platform's native alarm list UI, if available.
    *
    * @returns Promise that resolves with the action result
-   * @throws Error if opening alarms UI fails
    * @since 1.0.0
-   * @example
-   * ```typescript
-   * const result = await CapgoAlarm.openAlarms();
-   * if (result.success) {
-   *   console.log('Alarms UI opened');
-   * }
-   * ```
    */
   openAlarms(): Promise<NativeActionResult>;
 
   /**
    * Get information about the OS and capabilities.
    *
-   * @returns Promise that resolves with OS information
-   * @throws Error if getting OS info fails
    * @since 1.0.0
-   * @example
-   * ```typescript
-   * const info = await CapgoAlarm.getOSInfo();
-   * console.log('Platform:', info.platform);
-   * console.log('Supports native alarms:', info.supportsNativeAlarms);
-   * if (info.platform === 'android') {
-   *   console.log('Can schedule exact alarms:', info.canScheduleExactAlarms);
-   * }
-   * ```
    */
   getOSInfo(): Promise<OSInfo>;
 
   /**
    * Request relevant permissions for alarm usage on the platform.
-   * On Android, may route to settings for exact alarms.
+   * iOS: AlarmKit authorization.
+   * Android: routes to system settings for exact alarms when `exactAlarm: true`.
    *
-   * @param options - Optional parameters for the permission request
-   * @returns Promise that resolves with the permission result
-   * @throws Error if permission request fails
    * @since 1.0.0
-   * @example
-   * ```typescript
-   * const result = await CapgoAlarm.requestPermissions({ exactAlarm: true });
-   * if (result.granted) {
-   *   console.log('Permissions granted');
-   * } else {
-   *   console.log('Permissions denied');
-   * }
-   * ```
    */
   requestPermissions(options?: { exactAlarm?: boolean }): Promise<PermissionResult>;
 
   /**
    * Check the current permission state for native alarm access without triggering UI.
-   * On iOS this reports AlarmKit readiness; on Android it reports capability details.
    *
-   * @returns Promise that resolves with the permission result
-   * @throws Error if the native layer fails to respond
    * @since 8.0.4
-   * @example
-   * ```typescript
-   * const status = await CapgoAlarm.checkPermissions();
-   * console.log('AlarmKit allowed?', status.details?.alarmKit);
-   * ```
    */
   checkPermissions(): Promise<PermissionResult>;
 
   /**
    * Get the native Capacitor plugin version.
    *
-   * @returns Promise that resolves with the plugin version
-   * @throws Error if getting the version fails
    * @since 1.0.0
-   * @example
-   * ```typescript
-   * const { version } = await CapgoAlarm.getPluginVersion();
-   * console.log('Plugin version:', version);
-   * ```
    */
   getPluginVersion(): Promise<{ version: string }>;
 
   /**
    * Get a list of alarms scheduled by this app.
-   * On iOS 26+, returns alarms from AlarmKit. On Android, this is not supported
-   * as the system does not provide an API to query alarms.
+   * iOS 26+: returns alarms from AlarmKit.
+   * Android: returns alarms from the local SharedPreferences store maintained
+   * by this plugin.
    *
-   * @returns Promise that resolves with an array of alarm information
    * @since 1.1.0
-   * @example
-   * ```typescript
-   * const { alarms } = await CapgoAlarm.getAlarms();
-   * console.log('Scheduled alarms:', alarms);
-   * alarms.forEach(alarm => {
-   *   console.log(`Alarm ${alarm.id}: ${alarm.hour}:${alarm.minute} - ${alarm.label}`);
-   * });
-   * ```
    */
   getAlarms(): Promise<{ alarms: AlarmInfo[]; message?: string }>;
 }

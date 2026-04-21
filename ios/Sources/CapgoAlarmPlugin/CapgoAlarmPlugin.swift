@@ -7,11 +7,13 @@ import Capacitor
  */
 @objc(CapgoAlarmPlugin)
 public class CapgoAlarmPlugin: CAPPlugin, CAPBridgedPlugin {
-    private let pluginVersion: String = "8.0.7"
+    private let pluginVersion: String = "8.1.0-waif"
     public let identifier = "CapgoAlarmPlugin"
     public let jsName = "CapgoAlarm"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "createAlarm", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "cancelAlarm", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "cancelAllAlarms", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openAlarms", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getOSInfo", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginReturnPromise),
@@ -20,20 +22,73 @@ public class CapgoAlarmPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "getAlarms", returnType: CAPPluginReturnPromise)
     ]
 
+    private lazy var iso8601Formatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
     @objc func createAlarm(_ call: CAPPluginCall) {
-        let hour = call.getInt("hour") ?? -1
-        let minute = call.getInt("minute") ?? -1
-        if hour < 0 || minute < 0 { call.reject("hour and minute are required"); return }
+        let id = call.getString("id")
+        let dateString = call.getString("date")
+        let hour = call.getInt("hour")
+        let minute = call.getInt("minute")
         let label = call.getString("label")
 
-        AlarmKitBridge.createAlarm(hour: hour, minute: minute, label: label) { success, message in
-            call.resolve(["success": success, "message": message ?? NSNull()])
+        var parsedDate: Date?
+        if let dateString = dateString {
+            parsedDate = iso8601Formatter.date(from: dateString)
+                ?? ISO8601DateFormatter().date(from: dateString)
+            if parsedDate == nil {
+                call.reject("Invalid `date`. Expected ISO 8601 string.")
+                return
+            }
+        }
+
+        if parsedDate == nil && (hour == nil || minute == nil) {
+            call.reject("Either `date` or both `hour` and `minute` are required")
+            return
+        }
+
+        AlarmKitBridge.createAlarm(
+            id: id,
+            date: parsedDate,
+            hour: hour,
+            minute: minute,
+            label: label
+        ) { success, message, assignedId in
+            var result: [String: Any] = ["success": success]
+            if let message = message { result["message"] = message }
+            if let assignedId = assignedId { result["id"] = assignedId }
+            call.resolve(result)
+        }
+    }
+
+    @objc func cancelAlarm(_ call: CAPPluginCall) {
+        guard let id = call.getString("id") else {
+            call.reject("`id` is required")
+            return
+        }
+        AlarmKitBridge.cancelAlarm(id: id) { success, message in
+            var result: [String: Any] = ["success": success]
+            if let message = message { result["message"] = message }
+            call.resolve(result)
+        }
+    }
+
+    @objc func cancelAllAlarms(_ call: CAPPluginCall) {
+        AlarmKitBridge.cancelAllAlarms { success, message in
+            var result: [String: Any] = ["success": success]
+            if let message = message { result["message"] = message }
+            call.resolve(result)
         }
     }
 
     @objc func openAlarms(_ call: CAPPluginCall) {
         AlarmKitBridge.openAlarms { success, message in
-            call.resolve(["success": success, "message": message ?? NSNull()])
+            var result: [String: Any] = ["success": success]
+            if let message = message { result["message"] = message }
+            call.resolve(result)
         }
     }
 
@@ -48,7 +103,6 @@ public class CapgoAlarmPlugin: CAPPlugin, CAPBridgedPlugin {
         ])
     }
 
-    // Capacitor permission lifecycle
     override public func checkPermissions(_ call: CAPPluginCall) {
         guard AlarmKitBridge.isAvailable() else {
             call.resolve([
@@ -72,7 +126,6 @@ public class CapgoAlarmPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     override public func requestPermissions(_ call: CAPPluginCall) {
-        // Request AlarmKit authorization when available
         if !AlarmKitBridge.isAvailable() {
             call.resolve(["granted": false])
             return
@@ -84,8 +137,6 @@ public class CapgoAlarmPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    // No data conversion helpers needed for native-only operations
-
     @objc func getPluginVersion(_ call: CAPPluginCall) {
         call.resolve(["version": self.pluginVersion])
     }
@@ -93,12 +144,10 @@ public class CapgoAlarmPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func getAlarms(_ call: CAPPluginCall) {
         AlarmKitBridge.getAlarms { alarms, error in
             if let error = error {
-                // Return empty array with error message for consistency
                 call.resolve(["alarms": [], "message": error])
             } else {
                 call.resolve(["alarms": alarms])
             }
         }
     }
-
 }

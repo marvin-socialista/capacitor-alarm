@@ -53,36 +53,96 @@ class AlarmKitBridge {
         completion(false, "AlarmKit not available on this device/SDK")
     }
 
-    static func createAlarm(hour: Int, minute: Int, label: String?, completion: @escaping (Bool, String?) -> Void) {
+    /// Create an alarm. `explicitId` may be passed to use a stable UUID
+    /// (so the caller can cancel it later). If nil, a new UUID is generated.
+    /// `explicitDate` takes precedence over hour/minute when provided.
+    static func createAlarm(
+        id explicitId: String?,
+        date explicitDate: Date?,
+        hour: Int?,
+        minute: Int?,
+        label: String?,
+        completion: @escaping (Bool, String?, String?) -> Void
+    ) {
         #if canImport(AlarmKit)
         if #available(iOS 26.0, *) {
-            guard (0..<24).contains(hour), (0..<60).contains(minute) else {
-                completion(false, "Invalid time components for alarm.")
+            let triggerDate: Date
+            if let explicitDate = explicitDate {
+                triggerDate = explicitDate
+            } else if let hour = hour, let minute = minute,
+                      (0..<24).contains(hour), (0..<60).contains(minute),
+                      let computed = nextTriggerDate(hour: hour, minute: minute) {
+                triggerDate = computed
+            } else {
+                completion(false, "Either `date` or valid `hour`+`minute` must be provided.", nil)
                 return
+            }
+
+            let alarmId: UUID
+            if let explicitId = explicitId, let parsed = UUID(uuidString: explicitId) {
+                alarmId = parsed
+            } else if explicitId != nil {
+                completion(false, "Provided alarm id is not a valid UUID.", nil)
+                return
+            } else {
+                alarmId = UUID()
             }
 
             Task {
                 do {
-                    guard let triggerDate = nextTriggerDate(hour: hour, minute: minute) else {
-                        completion(false, "Unable to compute next trigger date.")
-                        return
-                    }
                     let displayLabel = sanitizedLabel(label)
                     let configuration = try alarmConfiguration(triggerDate: triggerDate, label: displayLabel)
 
-                    _ = try await AlarmManager.shared.schedule(id: UUID(), configuration: configuration)
+                    _ = try await AlarmManager.shared.schedule(id: alarmId, configuration: configuration)
 
                     let formatter = DateFormatter()
-                    formatter.dateStyle = .none
+                    formatter.dateStyle = .short
                     formatter.timeStyle = .short
                     formatter.locale = Locale.current
                     formatter.timeZone = Calendar.current.timeZone
 
                     let message = "Alarm scheduled for \(formatter.string(from: triggerDate))."
-                    completion(true, message)
+                    completion(true, message, alarmId.uuidString)
                 } catch {
-                    completion(false, "Failed to schedule alarm: \(error.localizedDescription)")
+                    completion(false, "Failed to schedule alarm: \(error.localizedDescription)", nil)
                 }
+            }
+            return
+        }
+        #endif
+        completion(false, "AlarmKit not available on this device/SDK", nil)
+    }
+
+    static func cancelAlarm(id: String, completion: @escaping (Bool, String?) -> Void) {
+        #if canImport(AlarmKit)
+        if #available(iOS 26.0, *) {
+            guard let uuid = UUID(uuidString: id) else {
+                completion(false, "Invalid alarm id: \(id)")
+                return
+            }
+            do {
+                try AlarmManager.shared.cancel(id: uuid)
+                completion(true, nil)
+            } catch {
+                completion(false, "Failed to cancel alarm: \(error.localizedDescription)")
+            }
+            return
+        }
+        #endif
+        completion(false, "AlarmKit not available on this device/SDK")
+    }
+
+    static func cancelAllAlarms(completion: @escaping (Bool, String?) -> Void) {
+        #if canImport(AlarmKit)
+        if #available(iOS 26.0, *) {
+            do {
+                let alarms = try AlarmManager.shared.alarms
+                for alarm in alarms {
+                    try AlarmManager.shared.cancel(id: alarm.id)
+                }
+                completion(true, nil)
+            } catch {
+                completion(false, "Failed to cancel all alarms: \(error.localizedDescription)")
             }
             return
         }
