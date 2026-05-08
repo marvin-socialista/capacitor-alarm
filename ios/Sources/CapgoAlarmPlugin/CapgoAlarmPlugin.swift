@@ -7,7 +7,7 @@ import Capacitor
  */
 @objc(CapgoAlarmPlugin)
 public class CapgoAlarmPlugin: CAPPlugin, CAPBridgedPlugin {
-    private let pluginVersion: String = "8.1.0-waif"
+    private let pluginVersion: String = "8.2.0-waif"
     public let identifier = "CapgoAlarmPlugin"
     public let jsName = "CapgoAlarm"
     public let pluginMethods: [CAPPluginMethod] = [
@@ -34,6 +34,7 @@ public class CapgoAlarmPlugin: CAPPlugin, CAPBridgedPlugin {
         let hour = call.getInt("hour")
         let minute = call.getInt("minute")
         let label = call.getString("label")
+        let sound = call.getString("sound")
 
         var parsedDate: Date?
         if let dateString = dateString {
@@ -55,7 +56,8 @@ public class CapgoAlarmPlugin: CAPPlugin, CAPBridgedPlugin {
             date: parsedDate,
             hour: hour,
             minute: minute,
-            label: label
+            label: label,
+            sound: sound
         ) { success, message, assignedId in
             var result: [String: Any] = ["success": success]
             if let message = message { result["message"] = message }

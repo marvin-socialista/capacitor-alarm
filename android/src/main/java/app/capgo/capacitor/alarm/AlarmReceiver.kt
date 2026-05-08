@@ -18,6 +18,7 @@ class AlarmReceiver : BroadcastReceiver() {
 
         const val EXTRA_ALARM_ID = "alarm_id"
         const val EXTRA_LABEL = "label"
+        const val EXTRA_SOUND = "sound"
 
         private const val TAG = "AlarmReceiver"
     }
@@ -30,13 +31,15 @@ class AlarmReceiver : BroadcastReceiver() {
 
         val alarmId = intent.getStringExtra(EXTRA_ALARM_ID) ?: "unknown"
         val label = intent.getStringExtra(EXTRA_LABEL) ?: "Alarm"
+        val sound = intent.getStringExtra(EXTRA_SOUND)
 
-        Log.d(TAG, "Alarm received: id=$alarmId label='$label'")
+        Log.d(TAG, "Alarm received: id=$alarmId label='$label' sound=${sound ?: "default"}")
 
         val serviceIntent = Intent(context, AlarmForegroundService::class.java).apply {
             action = AlarmForegroundService.ACTION_START
             putExtra(AlarmForegroundService.EXTRA_ALARM_ID, alarmId)
             putExtra(AlarmForegroundService.EXTRA_LABEL, label)
+            if (sound != null) putExtra(AlarmForegroundService.EXTRA_SOUND, sound)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

@@ -28,6 +28,21 @@ export interface NativeAlarmCreateOptions {
   minute?: number;
   /** Optional label for the alarm */
   label?: string;
+  /**
+   * Filename stem of a custom alarm sound bundled with the app.
+   *  - iOS: resolves to `<sound>.caf` in the main bundle (placed under
+   *    `ios/App/App/Sounds/` and added to the Xcode target). Threaded
+   *    into AlarmKit's `AlertConfiguration.AlertSound.named()`.
+   *  - Android: resolves to `R.raw.<sound>` (`.ogg` recommended).
+   *    Falls back to the system default alarm tone when missing or
+   *    when the resource id can't be located.
+   *
+   * Omit to use the platform default (system alarm sound on iOS, the
+   * default ALARM_ALERT URI on Android).
+   *
+   * @since 8.2.0
+   */
+  sound?: string;
   /** Android only: attempt to skip UI if possible (legacy AlarmClock intent path, deprecated) */
   skipUi?: boolean;
   /** Android only: set alarm to vibrate */

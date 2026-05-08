@@ -32,16 +32,19 @@ internal object AlarmScheduler {
         val triggerAt: Long,
         val hour: Int,
         val minute: Int,
+        /** Filename stem of a custom sound in res/raw (e.g. "alarm_clock");
+         *  null falls back to the system default ALARM_ALERT URI. */
+        val sound: String?,
     )
 
-    fun scheduleAlarm(context: Context, id: String, label: String, triggerAt: Long) {
+    fun scheduleAlarm(context: Context, id: String, label: String, triggerAt: Long, sound: String? = null) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
             throw IllegalStateException("SCHEDULE_EXACT_ALARM permission not granted — alarm '$id' cannot be scheduled")
         }
 
-        val pendingIntent = buildPendingIntent(context, id, label)
+        val pendingIntent = buildPendingIntent(context, id, label, sound)
         val alarmInfo = AlarmManager.AlarmClockInfo(triggerAt, null)
         alarmManager.setAlarmClock(alarmInfo, pendingIntent)
 
@@ -52,16 +55,17 @@ internal object AlarmScheduler {
             triggerAt = triggerAt,
             hour = cal.get(java.util.Calendar.HOUR_OF_DAY),
             minute = cal.get(java.util.Calendar.MINUTE),
+            sound = sound,
         )
         persistRecord(context, record)
 
-        Log.d(TAG, "Scheduled alarm '$id' at $triggerAt (${java.util.Date(triggerAt)})")
+        Log.d(TAG, "Scheduled alarm '$id' at $triggerAt (${java.util.Date(triggerAt)}) sound=${sound ?: "default"}")
     }
 
     fun cancelAlarm(context: Context, id: String) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pendingIntent = buildPendingIntent(
-            context, id, label = null,
+            context, id, label = null, sound = null,
             flags = PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
         )
         if (pendingIntent != null) {
@@ -100,7 +104,7 @@ internal object AlarmScheduler {
                 continue
             }
             try {
-                scheduleAlarm(context, record.id, record.label ?: "Alarm", record.triggerAt)
+                scheduleAlarm(context, record.id, record.label ?: "Alarm", record.triggerAt, record.sound)
                 rescheduled++
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to reschedule alarm '${record.id}': ${e.message}")
@@ -115,12 +119,14 @@ internal object AlarmScheduler {
         context: Context,
         id: String,
         label: String?,
+        sound: String?,
         flags: Int = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     ): PendingIntent? {
         val intent = Intent(context, AlarmReceiver::class.java).apply {
             action = AlarmReceiver.ACTION_FIRE_ALARM
             putExtra(AlarmReceiver.EXTRA_ALARM_ID, id)
             if (label != null) putExtra(AlarmReceiver.EXTRA_LABEL, label)
+            if (sound != null) putExtra(AlarmReceiver.EXTRA_SOUND, sound)
         }
         val requestCode = id.hashCode()
         return PendingIntent.getBroadcast(context, requestCode, intent, flags)
@@ -170,6 +176,7 @@ internal object AlarmScheduler {
                     triggerAt = obj.optLong("triggerAt"),
                     hour = obj.optInt("hour"),
                     minute = obj.optInt("minute"),
+                    sound = obj.optString("sound").takeIf { it.isNotEmpty() },
                 )
             }
         } catch (_: Exception) {
@@ -186,6 +193,7 @@ internal object AlarmScheduler {
                 put("triggerAt", r.triggerAt)
                 put("hour", r.hour)
                 put("minute", r.minute)
+                put("sound", r.sound ?: "")
             })
         }
         prefs(context).edit().putString(PREF_ALARMS_KEY, arr.toString()).apply()

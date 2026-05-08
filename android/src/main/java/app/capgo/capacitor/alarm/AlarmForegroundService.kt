@@ -37,6 +37,7 @@ class AlarmForegroundService : Service() {
 
         const val EXTRA_ALARM_ID = "alarm_id"
         const val EXTRA_LABEL = "label"
+        const val EXTRA_SOUND = "sound"
 
         const val CHANNEL_ID = "capgo_alarm"
         const val NOTIFICATION_ID = 9001
@@ -65,7 +66,8 @@ class AlarmForegroundService : Service() {
             else -> {
                 val label = intent?.getStringExtra(EXTRA_LABEL) ?: "Alarm"
                 val alarmId = intent?.getStringExtra(EXTRA_ALARM_ID) ?: "unknown"
-                startAlarm(alarmId, label)
+                val sound = intent?.getStringExtra(EXTRA_SOUND)
+                startAlarm(alarmId, label, sound)
                 // Remove the persisted record for this alarm — it has fired.
                 AlarmScheduler.cancelAlarm(applicationContext, alarmId)
             }
@@ -80,8 +82,8 @@ class AlarmForegroundService : Service() {
         super.onDestroy()
     }
 
-    private fun startAlarm(alarmId: String, label: String) {
-        Log.d(TAG, "Starting alarm: id=$alarmId label='$label'")
+    private fun startAlarm(alarmId: String, label: String, sound: String?) {
+        Log.d(TAG, "Starting alarm: id=$alarmId label='$label' sound=${sound ?: "default"}")
 
         acquireWakeLock(alarmId)
 
@@ -118,7 +120,7 @@ class AlarmForegroundService : Service() {
 
         startForeground(NOTIFICATION_ID, notification)
 
-        playAlarmSound()
+        playAlarmSound(sound)
         vibrate()
     }
 
@@ -133,18 +135,36 @@ class AlarmForegroundService : Service() {
         ).apply { acquire(60_000L) }
     }
 
-    private fun playAlarmSound() {
+    private fun playAlarmSound(soundName: String?) {
         try {
-            val fallback = android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI
             mediaPlayer?.release()
+            val attributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+
+            // Try the bundled custom sound first. Resolve via R.raw lookup
+            // because the resource id is generated at build time per id and
+            // can't be addressed by string elsewhere. If the lookup fails
+            // (stale value from a future build, missing asset on a beta
+            // channel), fall back to the system default — never let an
+            // alarm fire silently.
+            val customResId = if (!soundName.isNullOrEmpty()) {
+                resources.getIdentifier(soundName, "raw", packageName).takeIf { it != 0 }
+            } else null
+
             mediaPlayer = MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
-                setDataSource(applicationContext, fallback)
+                setAudioAttributes(attributes)
+                if (customResId != null) {
+                    val afd = resources.openRawResourceFd(customResId)
+                    if (afd != null) {
+                        afd.use { setDataSource(it.fileDescriptor, it.startOffset, it.length) }
+                    } else {
+                        setDataSource(applicationContext, android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI)
+                    }
+                } else {
+                    setDataSource(applicationContext, android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI)
+                }
                 isLooping = true
                 prepare()
                 start()

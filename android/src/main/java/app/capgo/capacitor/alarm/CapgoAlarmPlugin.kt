@@ -33,12 +33,13 @@ import com.getcapacitor.annotation.PermissionCallback
 )
 class CapgoAlarmPlugin : Plugin() {
 
-    private val pluginVersion: String = "8.1.0-waif"
+    private val pluginVersion: String = "8.2.0-waif"
 
     @PluginMethod
     fun createAlarm(call: PluginCall) {
         val id = call.getString("id") ?: java.util.UUID.randomUUID().toString()
         val label = call.getString("label") ?: "Alarm"
+        val sound = call.getString("sound")
         val dateStr = call.getString("date")
         val hour = call.getInt("hour")
         val minute = call.getInt("minute")
@@ -60,7 +61,7 @@ class CapgoAlarmPlugin : Plugin() {
         }
 
         try {
-            AlarmScheduler.scheduleAlarm(context, id = id, label = label, triggerAt = triggerAt)
+            AlarmScheduler.scheduleAlarm(context, id = id, label = label, triggerAt = triggerAt, sound = sound)
             val ret = JSObject().apply {
                 put("success", true)
                 put("id", id)

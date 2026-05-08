@@ -56,12 +56,16 @@ class AlarmKitBridge {
     /// Create an alarm. `explicitId` may be passed to use a stable UUID
     /// (so the caller can cancel it later). If nil, a new UUID is generated.
     /// `explicitDate` takes precedence over hour/minute when provided.
+    /// `sound` is the filename stem (without extension) of a `.caf` bundled
+    /// in the app's main bundle under Sounds/. Falls back to the system
+    /// default alarm sound if the file isn't found.
     static func createAlarm(
         id explicitId: String?,
         date explicitDate: Date?,
         hour: Int?,
         minute: Int?,
         label: String?,
+        sound: String?,
         completion: @escaping (Bool, String?, String?) -> Void
     ) {
         #if canImport(AlarmKit)
@@ -91,7 +95,7 @@ class AlarmKitBridge {
             Task {
                 do {
                     let displayLabel = sanitizedLabel(label)
-                    let configuration = try alarmConfiguration(triggerDate: triggerDate, label: displayLabel)
+                    let configuration = try alarmConfiguration(triggerDate: triggerDate, label: displayLabel, soundName: sound)
 
                     _ = try await AlarmManager.shared.schedule(id: alarmId, configuration: configuration)
 
@@ -248,7 +252,7 @@ private extension AlarmKitBridge {
         return Calendar.current.date(byAdding: .day, value: 1, to: candidate)
     }
 
-    static func alarmConfiguration(triggerDate: Date, label: String) throws -> AlarmManager.AlarmConfiguration<AlarmBridgeMetadata> {
+    static func alarmConfiguration(triggerDate: Date, label: String, soundName: String?) throws -> AlarmManager.AlarmConfiguration<AlarmBridgeMetadata> {
         #if canImport(SwiftUI)
         let stopTitle: LocalizedStringResource = LocalizedStringResource("Stop")
         let stopButton = AlarmButton(text: stopTitle, textColor: Color.white, systemImageName: "stop.fill")
@@ -261,9 +265,23 @@ private extension AlarmKitBridge {
         let metadata = AlarmBridgeMetadata(label: label)
 
         let attributes = AlarmAttributes<AlarmBridgeMetadata>(presentation: presentation, metadata: metadata, tintColor: tintColor)
+        // Resolve the sound: a non-nil value points at <name>.caf in the app
+        // bundle (e.g. "alarm_clock"). When the file is missing — stale id
+        // from a future build, or a fresh install before the asset lands —
+        // fall back to the system default rather than throwing, so an alarm
+        // never silently fails to fire.
+        let alertSound: AlertConfiguration.AlertSound
+        if let soundName = soundName,
+           !soundName.isEmpty,
+           Bundle.main.url(forResource: soundName, withExtension: "caf") != nil {
+            alertSound = .named(soundName)
+        } else {
+            alertSound = .default
+        }
         return AlarmManager.AlarmConfiguration<AlarmBridgeMetadata>.alarm(
             schedule: .fixed(triggerDate),
-            attributes: attributes
+            attributes: attributes,
+            sound: alertSound
         )
         #else
         struct MissingSwiftUI: Error {}
