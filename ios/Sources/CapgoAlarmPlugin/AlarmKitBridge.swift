@@ -238,6 +238,52 @@ private extension AlarmKitBridge {
         return trimmed.isEmpty ? "Alarm" : trimmed
     }
 
+    /// Copy a `.caf` shipped inside the Capacitor public/ bundle into the
+    /// app's `Library/Sounds/` directory if it isn't there yet. AlarmKit's
+    /// `AlertSound.named()` lookup searches the main bundle root and
+    /// Library/Sounds; the public/ folder reference puts our assets at
+    /// `<bundle>/public/alarms/caf/<name>.caf`, which the bare-name lookup
+    /// won't match. Mirroring once per (id × install) gives us a flat
+    /// canonical path without any pbxproj surgery.
+    ///
+    /// Returns true when the file is available in Library/Sounds after the
+    /// call. Returns false if the source can't be located (stale id) or
+    /// the copy fails (rare — quota, sandbox issue), so the caller can
+    /// fall back to the system default.
+    static func ensureCustomSoundAvailable(named soundName: String) -> Bool {
+        // Reject any path-traversal/edge-case input — AlarmKit names should
+        // be plain ascii filenames matching the catalog ids.
+        if soundName.contains("/") || soundName.contains("\\") || soundName.contains("..") {
+            return false
+        }
+        let fm = FileManager.default
+        guard let libraryDir = fm.urls(for: .libraryDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        let soundsDir = libraryDir.appendingPathComponent("Sounds", isDirectory: true)
+        let dest = soundsDir.appendingPathComponent("\(soundName).caf")
+        if fm.fileExists(atPath: dest.path) {
+            return true
+        }
+        // Try the public/ folder-reference subdirectory first (production
+        // path), then fall back to a bundle-root lookup so that hand-added
+        // files still work.
+        let candidates: [URL?] = [
+            Bundle.main.url(forResource: soundName, withExtension: "caf", subdirectory: "public/alarms/caf"),
+            Bundle.main.url(forResource: soundName, withExtension: "caf"),
+        ]
+        guard let source = candidates.compactMap({ $0 }).first else {
+            return false
+        }
+        do {
+            try fm.createDirectory(at: soundsDir, withIntermediateDirectories: true)
+            try fm.copyItem(at: source, to: dest)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     static func nextTriggerDate(hour: Int, minute: Int) -> Date? {
         let now = Date()
         var components = Calendar.current.dateComponents([.year, .month, .day], from: now)
@@ -265,15 +311,18 @@ private extension AlarmKitBridge {
         let metadata = AlarmBridgeMetadata(label: label)
 
         let attributes = AlarmAttributes<AlarmBridgeMetadata>(presentation: presentation, metadata: metadata, tintColor: tintColor)
-        // Resolve the sound: a non-nil value points at <name>.caf in the app
-        // bundle (e.g. "alarm_clock"). When the file is missing — stale id
-        // from a future build, or a fresh install before the asset lands —
-        // fall back to the system default rather than throwing, so an alarm
-        // never silently fails to fire.
+        // Resolve the sound. AlarmKit's `.named()` looks up the file in
+        // the main bundle OR `Library/Sounds/` of the data container.
+        // Capacitor ships our .caf assets inside the bundled `public/`
+        // folder reference (so Codemagic auto-includes them without
+        // pbxproj surgery); we lazily mirror them to Library/Sounds on
+        // first use so AlarmKit can find them by bare name. Falls back
+        // to `.default` whenever the source file is missing — never let
+        // an alarm fire silently.
         let alertSound: AlertConfiguration.AlertSound
         if let soundName = soundName,
            !soundName.isEmpty,
-           Bundle.main.url(forResource: soundName, withExtension: "caf") != nil {
+           ensureCustomSoundAvailable(named: soundName) {
             alertSound = .named(soundName)
         } else {
             alertSound = .default
