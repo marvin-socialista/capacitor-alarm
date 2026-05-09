@@ -62,6 +62,10 @@ class AlarmKitBridge {
     /// `sound` is the filename stem (without extension) of a `.caf` bundled
     /// in the app's main bundle under Sounds/. Falls back to the system
     /// default alarm sound if the file isn't found.
+    ///
+    /// The alert presentation includes a secondary "Open" button wired to
+    /// the OpenInApp LiveActivityIntent — tapping it brings the host app
+    /// to the foreground.
     static func createAlarm(
         id explicitId: String?,
         date explicitDate: Date?,
@@ -98,7 +102,12 @@ class AlarmKitBridge {
             Task {
                 do {
                     let displayLabel = sanitizedLabel(label)
-                    let configuration = try alarmConfiguration(triggerDate: triggerDate, label: displayLabel, soundName: sound)
+                    let configuration = try alarmConfiguration(
+                        triggerDate: triggerDate,
+                        label: displayLabel,
+                        soundName: sound,
+                        alarmId: alarmId
+                    )
 
                     _ = try await AlarmManager.shared.schedule(id: alarmId, configuration: configuration)
 
@@ -301,13 +310,25 @@ private extension AlarmKitBridge {
         return Calendar.current.date(byAdding: .day, value: 1, to: candidate)
     }
 
-    static func alarmConfiguration(triggerDate: Date, label: String, soundName: String?) throws -> AlarmManager.AlarmConfiguration<AlarmBridgeMetadata> {
+    static func alarmConfiguration(triggerDate: Date, label: String, soundName: String?, alarmId: UUID) throws -> AlarmManager.AlarmConfiguration<AlarmBridgeMetadata> {
         #if canImport(SwiftUI)
         let stopTitle: LocalizedStringResource = LocalizedStringResource("Stop")
         let stopButton = AlarmButton(text: stopTitle, textColor: Color.white, systemImageName: "stop.fill")
 
+        // Secondary "Open" button — tapping it foregrounds the host app
+        // via the OpenInApp LiveActivityIntent. `secondaryButtonBehavior:
+        // .custom` is what makes AlarmKit invoke our intent instead of
+        // applying its own snooze/dismiss default.
+        let openTitle: LocalizedStringResource = LocalizedStringResource("Open")
+        let openButton = AlarmButton(text: openTitle, textColor: Color.white, systemImageName: "arrow.right.circle.fill")
+
         let titleResource = LocalizedStringResource(String.LocalizationValue(label))
-        let alert = AlarmPresentation.Alert(title: titleResource, stopButton: stopButton)
+        let alert = AlarmPresentation.Alert(
+            title: titleResource,
+            stopButton: stopButton,
+            secondaryButton: openButton,
+            secondaryButtonBehavior: .custom
+        )
         let presentation = AlarmPresentation(alert: alert)
 
         let tintColor = Color.orange
@@ -340,6 +361,7 @@ private extension AlarmKitBridge {
         return AlarmManager.AlarmConfiguration<AlarmBridgeMetadata>.alarm(
             schedule: .fixed(triggerDate),
             attributes: attributes,
+            secondaryIntent: OpenInApp(alarmID: alarmId.uuidString),
             sound: alertSound
         )
         #else
