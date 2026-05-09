@@ -312,18 +312,19 @@ private extension AlarmKitBridge {
 
         let attributes = AlarmAttributes<AlarmBridgeMetadata>(presentation: presentation, metadata: metadata, tintColor: tintColor)
         // Resolve the sound. AlarmKit's `.named()` looks up the file in
-        // the main bundle OR `Library/Sounds/` of the data container.
-        // Capacitor ships our .caf assets inside the bundled `public/`
-        // folder reference (so Codemagic auto-includes them without
-        // pbxproj surgery); we lazily mirror them to Library/Sounds on
-        // first use so AlarmKit can find them by bare name. Falls back
-        // to `.default` whenever the source file is missing — never let
-        // an alarm fire silently.
-        let alertSound: AlertConfiguration.AlertSound
+        // the main bundle OR `Library/Sounds/` of the data container, and
+        // *requires the file extension* in the name (".caf"). Capacitor
+        // ships our .caf assets inside the bundled `public/` folder
+        // reference (so Codemagic auto-includes them without pbxproj
+        // surgery); we lazily mirror them to Library/Sounds on first use
+        // so AlarmKit can find them by name. Falls back to `.default`
+        // whenever the source file is missing — never let an alarm fire
+        // silently.
+        let alertSound: AlertSound
         if let soundName = soundName,
            !soundName.isEmpty,
            ensureCustomSoundAvailable(named: soundName) {
-            alertSound = .named(soundName)
+            alertSound = .named("\(soundName).caf")
         } else {
             alertSound = .default
         }
