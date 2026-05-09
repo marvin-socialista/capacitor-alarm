@@ -5,6 +5,9 @@ import UIKit
 
 #if canImport(AlarmKit)
 import AlarmKit
+#if canImport(ActivityKit)
+import ActivityKit
+#endif
 #if canImport(SwiftUI)
 import SwiftUI
 #endif
@@ -320,11 +323,17 @@ private extension AlarmKitBridge {
         // so AlarmKit can find them by name. Falls back to `.default`
         // whenever the source file is missing — never let an alarm fire
         // silently.
-        let alertSound: AlertSound
+        // AlertSound is declared in ActivityKit as
+        // `AlertConfiguration.AlertSound` and re-used by AlarmKit. Without
+        // `import ActivityKit` at the top, `AlertConfiguration` doesn't
+        // resolve and xcodebuild fails with "cannot find type in scope".
+        // Apple's own examples pass the bare stem to `.named()` (no .caf
+        // extension); the framework appends the extension internally.
+        let alertSound: AlertConfiguration.AlertSound
         if let soundName = soundName,
            !soundName.isEmpty,
            ensureCustomSoundAvailable(named: soundName) {
-            alertSound = .named("\(soundName).caf")
+            alertSound = .named(soundName)
         } else {
             alertSound = .default
         }
