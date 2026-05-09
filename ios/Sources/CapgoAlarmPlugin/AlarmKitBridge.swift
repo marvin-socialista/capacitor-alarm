@@ -5,6 +5,9 @@ import UIKit
 
 #if canImport(AlarmKit)
 import AlarmKit
+#if canImport(AppIntents)
+import AppIntents
+#endif
 #if canImport(ActivityKit)
 import ActivityKit
 #endif
@@ -18,7 +21,26 @@ private struct AlarmBridgeMetadata: AlarmMetadata {
 }
 #endif
 
-class AlarmKitBridge {
+public class AlarmKitBridge {
+    /// Optional consumer-supplied factory for the AlarmKit alert's secondary
+    /// button intent. Called once per `createAlarm` with the alarm UUID;
+    /// must return any LiveActivityIntent (typically one configured with
+    /// `openAppWhenRun = true` plus app-specific routing logic).
+    ///
+    /// Register from your AppDelegate at boot so the plugin can build the
+    /// AlarmConfiguration without needing to import the host-app types:
+    ///
+    ///   AlarmKitBridge.secondaryIntentFactory = { alarmId in
+    ///       OpenAppointmentIntent(alarmId: alarmId, itemId: …)
+    ///   }
+    ///
+    /// When unset (default), the plugin falls back to its built-in
+    /// `OpenInApp` stub which only foregrounds the app via openAppWhenRun.
+    #if canImport(AlarmKit)
+    @available(iOS 26.0, *)
+    public static var secondaryIntentFactory: ((_ alarmId: UUID) -> any LiveActivityIntent)?
+    #endif
+
     static func isAvailable() -> Bool {
         #if canImport(AlarmKit)
         if #available(iOS 26.0, *) { return true } else { return false }
@@ -315,10 +337,11 @@ private extension AlarmKitBridge {
         let stopTitle: LocalizedStringResource = LocalizedStringResource("Stop")
         let stopButton = AlarmButton(text: stopTitle, textColor: Color.white, systemImageName: "stop.fill")
 
-        // Secondary "Open" button — tapping it foregrounds the host app
-        // via the OpenInApp LiveActivityIntent. `secondaryButtonBehavior:
-        // .custom` is what makes AlarmKit invoke our intent instead of
-        // applying its own snooze/dismiss default.
+        // Secondary "Open" button — tapping it invokes the consumer-supplied
+        // intent (or the plugin's built-in OpenInApp stub if no factory is
+        // registered). `secondaryButtonBehavior: .custom` is what makes
+        // AlarmKit invoke our intent instead of applying its own
+        // snooze/dismiss default.
         let openTitle: LocalizedStringResource = LocalizedStringResource("Open")
         let openButton = AlarmButton(text: openTitle, textColor: Color.white, systemImageName: "arrow.right.circle.fill")
 
@@ -358,10 +381,17 @@ private extension AlarmKitBridge {
         } else {
             alertSound = .default
         }
+        // Pick the secondary-button intent. Consumers can register a factory
+        // (typically in AppDelegate) that returns a host-app intent like
+        // OpenAppointmentIntent — that intent has access to host-app types
+        // the plugin can't import. If unset, fall back to the plugin's own
+        // OpenInApp stub which only foregrounds the app.
+        let secondaryIntent: any LiveActivityIntent = AlarmKitBridge.secondaryIntentFactory?(alarmId)
+            ?? OpenInApp(alarmID: alarmId.uuidString)
         return AlarmManager.AlarmConfiguration<AlarmBridgeMetadata>.alarm(
             schedule: .fixed(triggerDate),
             attributes: attributes,
-            secondaryIntent: OpenInApp(alarmID: alarmId.uuidString),
+            secondaryIntent: secondaryIntent,
             sound: alertSound
         )
         #else
