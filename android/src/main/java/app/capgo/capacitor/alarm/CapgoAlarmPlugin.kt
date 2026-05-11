@@ -33,7 +33,7 @@ import com.getcapacitor.annotation.PermissionCallback
 )
 class CapgoAlarmPlugin : Plugin() {
 
-    private val pluginVersion: String = "8.3.0-waif"
+    private val pluginVersion: String = "8.3.1-waif"
 
     @PluginMethod
     fun createAlarm(call: PluginCall) {

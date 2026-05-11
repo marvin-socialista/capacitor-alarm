@@ -272,24 +272,37 @@ private extension AlarmKitBridge {
         return trimmed.isEmpty ? "Alarm" : trimmed
     }
 
-    /// Copy a `.caf` shipped inside the Capacitor public/ bundle into the
-    /// app's `Library/Sounds/` directory if it isn't there yet. AlarmKit's
-    /// `AlertSound.named()` lookup searches the main bundle root and
-    /// Library/Sounds; the public/ folder reference puts our assets at
-    /// `<bundle>/public/alarms/caf/<name>.caf`, which the bare-name lookup
-    /// won't match. Mirroring once per (id × install) gives us a flat
-    /// canonical path without any pbxproj surgery.
+    /// Verify the custom `.caf` is reachable by AlarmKit's
+    /// `AlertSound.named()` resolver. AlarmKit searches the main bundle root
+    /// AND `Library/Sounds/` of the data container; in iOS 26 the latter is
+    /// silently ignored (Apple Feedback FB19779004), so the bundle-root
+    /// location is the only reliable one.
     ///
-    /// Returns true when the file is available in Library/Sounds after the
-    /// call. Returns false if the source can't be located (stale id) or
-    /// the copy fails (rare — quota, sandbox issue), so the caller can
-    /// fall back to the system default.
+    /// In WAIF's build pipeline, codemagic.yaml mirrors the .caf files from
+    /// `App.app/public/alarms/caf/` (where the Capacitor `public/` folder
+    /// reference plants them) into `App.app/` root before exportArchive —
+    /// so this lookup succeeds for the shipped catalog. We keep the
+    /// Library/Sounds copy path as a defensive fallback for the day Apple
+    /// fixes the bug; iOS will prefer the bundle copy regardless.
+    ///
+    /// Returns true when the file is reachable from at least one of the
+    /// AlarmKit-supported paths. Returns false otherwise so the caller can
+    /// fall back to the system default rather than firing silently.
     static func ensureCustomSoundAvailable(named soundName: String) -> Bool {
         // Reject any path-traversal/edge-case input — AlarmKit names should
         // be plain ascii filenames matching the catalog ids.
         if soundName.contains("/") || soundName.contains("\\") || soundName.contains("..") {
             return false
         }
+        // Primary path: file is already at bundle root (codemagic copy).
+        // This is the only path that actually plays audio on iOS 26 today.
+        if Bundle.main.url(forResource: soundName, withExtension: "caf") != nil {
+            return true
+        }
+        // Defensive fallback: try to mirror from the public/ subdirectory
+        // into Library/Sounds for the future iOS release where that path
+        // is fixed AND for local dev builds where the codemagic copy
+        // hasn't run.
         let fm = FileManager.default
         guard let libraryDir = fm.urls(for: .libraryDirectory, in: .userDomainMask).first else {
             return false
@@ -299,14 +312,11 @@ private extension AlarmKitBridge {
         if fm.fileExists(atPath: dest.path) {
             return true
         }
-        // Try the public/ folder-reference subdirectory first (production
-        // path), then fall back to a bundle-root lookup so that hand-added
-        // files still work.
-        let candidates: [URL?] = [
-            Bundle.main.url(forResource: soundName, withExtension: "caf", subdirectory: "public/alarms/caf"),
-            Bundle.main.url(forResource: soundName, withExtension: "caf"),
-        ]
-        guard let source = candidates.compactMap({ $0 }).first else {
+        guard let source = Bundle.main.url(
+            forResource: soundName,
+            withExtension: "caf",
+            subdirectory: "public/alarms/caf"
+        ) else {
             return false
         }
         do {
